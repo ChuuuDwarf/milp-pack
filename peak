@@ -1,0 +1,357 @@
+可以，而且我覺得**這反而可能是你 License 平滑問題最有價值的驗證方式**。
+
+但要注意一件事：
+
+你不是要證明「包成 session 一定比較快」，而是要證明：
+
+> **在相同 workload 下，透過 session-aware scheduling，可以降低 license churn（checkout/release 次數）與 license oscillation，並改善整體系統效率。**
+
+因為「session」這件事情其實改變的是 **license lifecycle model**，不是單純排程。
+
+---
+
+## 先定義兩種模式
+
+假設 EDA job：
+
+```
+Job A
+需要 20 licenses
+runtime = 30 min
+
+Job B
+需要 30 licenses
+runtime = 20 min
+```
+
+---
+
+## Mode 1：傳統 LSF job-by-job
+
+每個 job：
+
+```
+submit
+ |
+pending
+ |
+start
+ |
+checkout license
+ |
+run
+ |
+release license
+```
+
+可能變成：
+
+```
+time
+
+0    20    30    50
+
+A █████
+B      ████
+C           █████
+
+License:
+
+20   50   30   0
+```
+
+問題：
+
+* checkout/release 頻繁
+* license curve 大幅震盪
+* license server 壓力高
+
+---
+
+## Mode 2：Session-based scheduling
+
+例如：
+
+先建立：
+
+```
+EDA Session
+|
+|-- Job A
+|-- Job B
+|-- Job C
+```
+
+Session 保留 license：
+
+```
+checkout
+
+████████████████
+
+session alive
+
+Job switching inside session
+
+release
+```
+
+變成：
+
+```
+License:
+
+50
+50
+50
+50
+30
+30
+0
+```
+
+可能：
+
+* Peak 不一定降低
+* 但是 oscillation 降低
+* checkout 次數降低
+
+---
+
+# 你的 LSF Simulator 可以量測什麼？
+
+我會設計 metrics：
+
+---
+
+## 1. Makespan
+
+原本：
+
+[
+C_{max}
+]
+
+---
+
+## 2. License Peak
+
+[
+P=max(L_t)
+]
+
+---
+
+## 3. License Oscillation
+
+[
+TV=\sum |L_t-L_{t-1}|
+]
+
+---
+
+## 4. License Churn（我覺得很重要）
+
+這是 session 最大的 contribution。
+
+定義：
+
+[
+Churn=
+N_{checkout}+N_{release}
+]
+
+例如：
+
+傳統：
+
+```
+Job1 checkout
+Job1 release
+Job2 checkout
+Job2 release
+```
+
+=4
+
+Session：
+
+```
+Session checkout
+
+Job1
+Job2
+Job3
+
+Session release
+```
+
+=2
+
+---
+
+## 5. License Idle Waste
+
+這個很 EDA。
+
+例如：
+
+session hold license：
+
+```
+License:
+
+100
+100
+100
+
+但是 job:
+
+80
+0
+90
+```
+
+浪費。
+
+定義：
+
+[
+Waste=
+\sum_t(L_t-A_t)
+]
+
+其中：
+
+* (L_t)：allocated license
+* (A_t)：actual active license
+
+---
+
+# 但有一個陷阱
+
+Session 不一定永遠好。
+
+例如：
+
+session 保留 100 license：
+
+```
+time
+
+0-100 min
+
+License:
+100 100 100
+```
+
+但是：
+
+job queue 空了。
+
+那反而：
+
+* Peak 高
+* Waste 高
+
+所以你的 AI Agent 可以做：
+
+## Dynamic Session Size
+
+例如：
+
+不要固定：
+
+```
+Session = 100 license
+```
+
+而是：
+
+```
+根據 queue prediction
+
+建立:
+
+20 license session
+50 license session
+100 license session
+```
+
+---
+
+# 這會讓你的研究故事變漂亮
+
+你的架構變成：
+
+```
+LSF workload
+      |
+      v
+Simulator
+      |
+      |
+Traditional LSF
+      |
+      |
+Session-aware Scheduler
+      |
+      |
+Optimization Engine
+(MILP / DCA)
+      |
+      |
+AI Agent
+(dynamic session policy)
+```
+
+---
+
+# 我甚至覺得 session 可以成為你的第三個 contribution
+
+你的論文 contribution 可以變：
+
+### Contribution 1
+
+License-aware multi-objective scheduling
+
+(Makespan + Peak + Oscillation)
+
+---
+
+### Contribution 2
+
+MILP/DCA optimization framework
+
+(large scale scheduling)
+
+---
+
+### Contribution 3
+
+Session-based license management
+
+(reduce license churn and improve stability)
+
+---
+
+所以回答你的問題：
+
+> 我假如有 LSF simulator，我應該是可以用模擬器證明包成 session 比較快吧?
+
+答案：
+
+**可以，但不要只證明「比較快」。**
+
+更好的論述是：
+
+> Session-based scheduling reduces license transaction overhead and stabilizes license utilization, which can improve effective throughput under license-constrained EDA workloads.
+
+你的 simulator 就是用來證明：
+
+* Makespan 是否改善
+* License curve 是否平滑
+* checkout/release 是否下降
+* license utilization 是否提升
+
+這比單純跑一個 benchmark 說「快 5%」更像研究。
