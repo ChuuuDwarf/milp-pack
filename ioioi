@@ -1,0 +1,365 @@
+如果是我的話，我會把 **License 平滑（License Oscillation）** 定義成一個正式的 optimization objective，而不是用一些 heuristic（例如限制每分鐘變化不能超過多少）。原因是你的整個架構是 MILP → DCA → AI Agent，最好保持數學一致性。
+
+我建議分三層處理：
+
+---
+
+# Layer 1：先定義你要平滑的是什麼
+
+License curve：
+
+[
+L(t)
+]
+
+代表時間 (t) 的 license 使用量。
+
+例如：
+
+不好：
+
+```
+Time
+
+0   10   20   30   40
+
+0   100  0    100  0
+```
+
+好：
+
+```
+0   50   70   80   75
+```
+
+---
+
+# 方法 1（最推薦）：Total Variation Minimization
+
+也就是你原本提到的：
+
+[
+O=\sum_t |L(t)-L(t-1)|
+]
+
+這其實叫：
+
+> Total Variation (TV)
+
+它在 image processing、signal smoothing 很常見。
+
+意思：
+
+懲罰 license curve 的劇烈變化。
+
+---
+
+## MILP 寫法
+
+新增：
+
+[
+D_t
+]
+
+代表：
+
+時間 t 的 license change。
+
+Constraint:
+
+[
+D_t \ge L_t-L_{t-1}
+]
+
+[
+D_t \ge L_{t-1}-L_t
+]
+
+所以：
+
+[
+D_t=|L_t-L_{t-1}|
+]
+
+Objective:
+
+加入：
+
+[
+\beta\sum_tD_t
+]
+
+---
+
+例如：
+
+排程 A：
+
+```
+L:
+
+0
+100
+0
+100
+0
+```
+
+Oscillation:
+
+[
+100+100+100+100=400
+]
+
+排程 B：
+
+```
+0
+50
+70
+80
+70
+```
+
+Oscillation:
+
+[
+50+20+10+10=90
+]
+
+自然會偏向 B。
+
+---
+
+# Layer 2：避免「慢慢爬升但是長時間高占用」
+
+這是 TV 的弱點。
+
+例如：
+
+```
+0
+20
+40
+60
+80
+100
+```
+
+TV：
+
+[
+100
+]
+
+看起來很平滑。
+
+但是最後 license 打滿。
+
+所以需要搭配：
+
+## Peak objective
+
+[
+P=max(L_t)
+]
+
+constraint：
+
+[
+L_t\le P
+]
+
+objective:
+
+[
+\alpha P
+]
+
+---
+
+最後：
+
+[
+min
+C_{max}
++
+\alpha P
++
+\beta\sum D_t
+]
+
+這三個互補：
+
+| Objective | 控制          |
+| --------- | ----------- |
+| Makespan  | 速度          |
+| Peak      | 最高license需求 |
+| TV        | 曲線穩定        |
+
+---
+
+# Layer 3：EDA 實際環境我會加一個更有特色的 metric
+
+我覺得這可能是你的 paper innovation。
+
+## License Ramp Rate
+
+EDA license server 真正怕的是：
+
+突然大量 checkout。
+
+例如：
+
+```
+Time
+
+0  1  2  3
+
+10 90 95 100
+```
+
+和：
+
+```
+10 30 50 70
+```
+
+Peak 一樣。
+
+TV 不一定反映 startup shock。
+
+所以加入：
+
+[
+R_t=L_t-L_{t-1}
+]
+
+只懲罰上升：
+
+[
+R^+
+*t=max(0,L_t-L*{t-1})
+]
+
+Objective:
+
+[
+\gamma\sum_tR_t^+
+]
+
+這代表：
+
+> 控制 license checkout burst
+
+---
+
+# 所以我最後推薦你的 Objective
+
+不要只用 Oscillation。
+
+我會設：
+
+[
+\boxed{
+min
+C_{max}
++
+\alpha P
++
+\beta TV
++
+\gamma Ramp
+}
+]
+
+其中：
+
+## 1. Efficiency
+
+[
+C_{max}
+]
+
+## 2. Capacity control
+
+[
+P
+]
+
+## 3. Stability
+
+[
+TV=
+\sum |L_t-L_{t-1}|
+]
+
+## 4. Burst protection
+
+[
+Ramp=
+\sum max(0,L_t-L_{t-1})
+]
+
+---
+
+# 研究設計上我會這樣做
+
+不要一開始四個都 optimize。
+
+建議實驗：
+
+## Baseline
+
+```
+Min Makespan
+```
+
+↓
+
+## Experiment 1
+
+```
+Makespan + Peak
+```
+
+↓
+
+## Experiment 2
+
+```
+Makespan + Peak + TV
+```
+
+↓
+
+## Experiment 3
+
+```
+Makespan + Peak + TV + Ramp
+```
+
+然後畫：
+
+1. Makespan vs Peak
+
+2. License curve before/after
+
+3. Oscillation index
+
+Reviewer 很容易理解你的 contribution。
+
+---
+
+我的建議是：
+
+**第一版先採用 TV（(\sum |L_t-L_{t-1}|)）作為 License Oscillation，因為它 MILP 最乾淨。**
+
+等你的 framework 跑起來，再加入 Ramp Rate 作為 EDA-specific enhancement。
+
+這樣你的研究主軸會比較穩：
+
+> 「控制 license consumption profile，而不只是降低 license consumption。」
+
+這一句其實比單純說「降低 peak」更有研究價值。
