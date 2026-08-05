@@ -1,0 +1,519 @@
+你這個問題抓得很好，而且我覺得你又把模型拉回正確方向了。
+
+你說：
+
+> 我的 vector 沒有這段資料阿
+
+對，**如果你的 vector 只是 License requirement vector，那它本來就沒有 runtime similarity。**
+
+例如你的 vector：
+
+```text
+LIC1 LIC2 LIC3 LIC4
+
+JOB A:
+ 1    0    0    0
+
+JOB B:
+ 0    1    1    1
+```
+
+它只描述：
+
+> 這個 Job 需要哪些 license
+
+不描述：
+
+* 跑多久
+* 是否短 job
+* 是否適合被包
+
+所以我前面講 runtime 其實不是 vector 的一部分，而是**另一個 Job attribute**。
+
+比較正確的 representation 應該是：
+
+```
+Job =
+{
+    License Vector,
+    Runtime,
+    CPU,
+    Memory,
+    Queue,
+    Aging,
+    Priority
+}
+```
+
+而不是：
+
+```
+Job = Vector
+```
+
+---
+
+然後你提到：
+
+> 沒有這種 A: LIC1 / B: LIC1+LIC2 情形
+
+這點也對。
+
+如果你的 EDA license model 是：
+
+* Step 已經知道需要什麼 tool
+* tool 對 license feature 的需求是固定組合
+
+那你的 pattern 很可能是：
+
+```
+Pattern 1:
+LIC1
+
+Pattern 2:
+LIC2+LIC3+LIC4
+
+Pattern 3:
+LIC6
+```
+
+而不是任意：
+
+```
+LIC1
+LIC1+LIC2
+LIC1+LIC3
+...
+```
+
+所以 session formation 可以簡化。
+
+---
+
+我會改成：
+
+## Session 第一條件：Exact License Pattern Match
+
+例如：
+
+```
+Group A:
+
+JOB1:
+(1,0,0,0)
+
+JOB2:
+(1,0,0,0)
+
+JOB3:
+(1,0,0,0)
+```
+
+可以包。
+
+但是：
+
+```
+JOB4:
+(1,1,0,0)
+```
+
+不是同一群。
+
+---
+
+然後 runtime 的角色不是判斷「能不能包」，而是：
+
+> 同 pattern 下，決定 session size。
+
+例如：
+
+同樣 LIC1：
+
+### 情況 A
+
+```
+JOB1 5 min
+JOB2 6 min
+JOB3 4 min
+```
+
+可以：
+
+```
+Session size = 100
+```
+
+因為差異小。
+
+---
+
+### 情況 B
+
+```
+JOB1 1 min
+JOB2 200 min
+JOB3 2 min
+```
+
+如果全部包：
+
+```
+Session:
+JOB1+JOB2+JOB3
+```
+
+會有問題。
+
+所以可能：
+
+```
+Session 1:
+JOB1+JOB3
+
+Session 2:
+JOB2
+```
+
+---
+
+所以你的模型其實比較像：
+
+```
+Queue
+ |
+ v
+Jobs
+
+每個 Job:
+  License Pattern (vector)
+  Runtime
+  Aging
+
+ |
+ v
+
+同 Pattern clustering
+
+ |
+ v
+
+Runtime-aware session size decision
+
+ |
+ v
+
+Dispatch
+```
+
+---
+
+但我也要修正一點：
+
+你不需要做「vector similarity」。
+
+因為你的環境不是任意 resource combination。
+
+你的 license pattern 是離散且固定的。
+
+比較合理的是：
+
+```
+License Pattern ID
+```
+
+例如：
+
+```
+Pattern A:
+LIC1
+
+Pattern B:
+LIC2+LIC3+LIC4
+
+Pattern C:
+LIC6
+```
+
+vector 只是 Pattern 的表示方式。
+
+---
+
+所以最後：
+
+* **Vector：表示 license requirement**
+* **Runtime：決定 session 怎麼切**
+* **Aging：防止某些 pattern 永遠沒機會**
+* **Session：減少大量短 job 的 license churn**
+* **Dispatch：在不同 session / job 間選下一個執行單位**
+
+我覺得這樣比「vector 裡面塞所有資訊」乾淨很多。你剛剛指出的限制其實很重要，因為真實 EDA license 通常不是 arbitrary multi-resource，而是固定 tool/license bundle。
+
+
+這個問題很重要，因為它會直接影響你的目標到底是 **makespan** 還是 **平均完成時間**。
+
+你說「long job 要先做」，其實在你的情境下是合理的，但要小心：**不是所有 long job 都應該優先。**
+
+---
+
+先看為什麼。
+
+假設同一個 Queue、同一個 License pattern：
+
+```
+LIC2+LIC3+LIC4
+```
+
+現在等待：
+
+```
+JOB A: 300 min
+JOB B: 5 min
+JOB C: 5 min
+JOB D: 5 min
+```
+
+如果先做短：
+
+```
+B C D A
+```
+
+結果：
+
+```
+時間 0       15       315
+
+B/C/D 完成
+              A 完成
+```
+
+Makespan = 315 min
+
+如果先做長：
+
+```
+A B C D
+```
+
+結果：
+
+```
+時間 0       300       315
+A 完成
+          B/C/D完成
+```
+
+Makespan 也是 315 min。
+
+所以單純「long job first」不一定降低 makespan。
+
+---
+
+但是你的 EDA 情境有一個特殊點：
+
+## Long job 會造成 tail
+
+例如：
+
+很多短 job：
+
+```
+100 jobs × 5 min
+```
+
+一個長 job：
+
+```
+1 job × 500 min
+```
+
+如果 scheduler 一直偏向：
+
+* license fit 好
+* 可以快速完成
+* 小 job
+
+可能：
+
+```
+短 job 全部跑完
+
+剩長 job
+```
+
+最後：
+
+```
+Makespan = 500 min + 等待時間
+```
+
+所以需要避免 long job 被餓死。
+
+---
+
+所以我不會加入：
+
+> Long Job First
+
+而是：
+
+> Long Job Awareness
+
+也就是在 score 裡增加：
+
+### Remaining workload / tail risk
+
+例如：
+
+Job:
+
+```
+runtime = 500 min
+waiting = 200 min
+```
+
+它的 priority 應該提升。
+
+---
+
+所以你的 dispatch score 可能變成：
+
+```
+Score =
+  Resource Fit
++ Aging
++ Long Job Factor
++ Queue Priority
+```
+
+概念：
+
+---
+
+### Resource Fit
+
+現在跑它合不合適？
+
+例如：
+
+目前 LIC2+3+4 很空：
+
+加分。
+
+---
+
+### Aging
+
+等越久：
+
+加分。
+
+避免 starvation。
+
+---
+
+### Long Job Factor
+
+不是單純 runtime 越長越高。
+
+而是：
+
+```
+runtime × waiting time
+```
+
+類似：
+
+「這個長工作如果現在還不跑，會不會變成最後的尾巴？」
+
+---
+
+### Session
+
+還是保留。
+
+例如：
+
+大量短 job：
+
+```
+LIC1
+
+5 min × 100
+```
+
+形成：
+
+```
+Session:
+100 jobs
+```
+
+避免 100 次 license operation。
+
+但是：
+
+長 job：
+
+```
+LIC1
+
+500 min
+```
+
+不要跟短 job 混 session。
+
+---
+
+所以最後我會變成：
+
+```
+LSF Queue
+    |
+    v
+Waiting Jobs
+
+Job attributes:
+- License Pattern(Vector)
+- Runtime
+- Waiting Time(Aging)
+- Queue Priority
+
+    |
+    v
+
+Session Formation
+    |
+    |-- same license pattern
+    |-- compatible runtime
+
+    v
+
+Dispatch Score
+    |
+    |-- resource fit
+    |-- aging
+    |-- long-job tail avoidance
+
+    v
+
+Run
+```
+
+---
+
+我覺得你這裡其實碰到一個很核心的排程 trade-off：
+
+* 短 job → 提高 throughput
+* 長 job → 避免 makespan tail
+* session → 降低 license overhead
+* vector → 確保 license 可行
+
+所以不是「短先」或「長先」，而是你的 scheduler 要避免任何一種極端。
+
+你的目標如果是 **makespan**，我會把「long job first」改成：
+
+> **Critical long job protection**
+
+也就是保護可能決定最後完工時間的長工作，而不是無條件先跑長工作。
