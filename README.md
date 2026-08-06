@@ -2,6 +2,9 @@
 
 <img width="887" height="481" alt="image" src="https://github.com/user-attachments/assets/ca316c56-69ac-4836-ba70-ff721e77b605" />
 
+<img width="602" height="493" alt="image" src="https://github.com/user-attachments/assets/0d25488f-6004-4047-a10d-845eff1aa13c" />
+
+
 我覺得這是你現在最重要的問題，而且**比演算法本身還重要**。
 
 因為一篇排程論文不是證明「我的方法很酷」，而是要證明：
